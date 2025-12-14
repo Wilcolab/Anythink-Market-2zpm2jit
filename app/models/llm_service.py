@@ -1,5 +1,6 @@
 import re
 import logging
+from textblob import TextBlob
 from openai import AzureOpenAI
 from app.config.credentials_service import CredentialsService
 
@@ -83,6 +84,22 @@ class LLMService:
             return text
         except Exception:
             return "[REDACTION_ERROR]"
+
+    def context_filter(self, response: str) -> str:
+        """Analyze and filter response based on sentiment polarity.
+
+        If the sentiment polarity is below -0.1, return a filtered placeholder.
+        Otherwise return the original response.
+        """
+        try:
+            if not response:
+                return response
+            polarity = TextBlob(response).sentiment.polarity
+            if polarity < -0.1:
+                return "[Filtered due to negative sentiment]"
+            return response
+        except Exception:
+            return "[FILTER_ERROR]"
         except Exception as e:
             logger.error(f"Error initializing Azure OpenAI client: {str(e)}")
             raise
@@ -112,9 +129,11 @@ class LLMService:
             
             if response.choices and len(response.choices) > 0:
                 content = response.choices[0].message.content
+                # Apply sentiment-based context filter
+                filtered_content = self.context_filter(content)
                 # Audit: log LLM's response before returning (redacted)
-                logger.info(f"LLM response: {self.redact_sensitive_data(content)}")
-                return content
+                logger.info(f"LLM response: {self.redact_sensitive_data(filtered_content)}")
+                return filtered_content
             else:
                 return "I'm sorry, I couldn't generate a response. Please try again."
                 
