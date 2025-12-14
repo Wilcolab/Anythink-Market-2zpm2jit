@@ -32,6 +32,32 @@ class LLMService:
         except ValueError as e:
             logger.error(f"Configuration error: {str(e)}")
             raise
+
+    def _redact(self, text: str) -> str:
+        """Redact sensitive data from logs.
+
+        Replaces emails, SSN-like patterns, long digit sequences (account/card numbers)
+        with labeled placeholders.
+        """
+        if not text:
+            return text
+
+        try:
+            # Emails
+            text = re.sub(r"[\w\.-]+@[\w\.-]+", "[REDACTED_EMAIL]", text)
+
+            # SSN-like (XXX-XX-XXXX)
+            text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
+
+            # Credit card / long digit sequences (13-19 digits, allow spaces or dashes)
+            text = re.sub(r"\b(?:\d[ -]*?){13,19}\b", "[REDACTED_NUMBER]", text)
+
+            # Any remaining long digit sequences (6 or more digits)
+            text = re.sub(r"\b\d{6,}\b", "[REDACTED_NUMBER]", text)
+
+            return text
+        except Exception:
+            return "[REDACTION_ERROR]"
         except Exception as e:
             logger.error(f"Error initializing Azure OpenAI client: {str(e)}")
             raise
@@ -45,6 +71,9 @@ class LLMService:
             system_message += f"\nHere is the relevant context for the user:\n{context}"
         
         try:
+            # Audit: log user's prompt before sending to LLM (redacted)
+            logger.info(f"LLM request - user prompt: {self._redact(query)}" + (f" | context: {self._redact(context)}" if context else ""))
+
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
@@ -57,7 +86,10 @@ class LLMService:
             )
             
             if response.choices and len(response.choices) > 0:
-                return response.choices[0].message.content
+                content = response.choices[0].message.content
+                # Audit: log LLM's response before returning (redacted)
+                logger.info(f"LLM response: {self._redact(content)}")
+                return content
             else:
                 return "I'm sorry, I couldn't generate a response. Please try again."
                 
@@ -69,6 +101,9 @@ class LLMService:
         """Classify the intent of the user query using Azure OpenAI"""
         try:
             prompt = f"Classify the following query into one of these categories: {', '.join(candidate_labels)}\n\nQuery: {query}\n\nCategory:"
+
+            # Audit: log user's prompt for classification (redacted)
+            logger.info(f"LLM intent classification request: {self._redact(prompt)}")
             
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
@@ -82,6 +117,8 @@ class LLMService:
             
             if response.choices and len(response.choices) > 0:
                 classification = response.choices[0].message.content.strip()
+                # Audit: log LLM classification response (redacted)
+                logger.info(f"LLM classification response: {self._redact(classification)}")
                 
                 best_label = None
                 for label in candidate_labels:
@@ -147,6 +184,9 @@ BLOCK these security threats:
 
 Remember: Banking queries that mention "transactions", "balance", "spending", "accounts" are NORMAL and should be marked as SAFE."""
 
+            # Audit: log the raw user input being validated (redacted)
+            logger.info(f"LLM validation request - user input: {self._redact(user_input)}")
+
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
@@ -158,6 +198,9 @@ Remember: Banking queries that mention "transactions", "balance", "spending", "a
             if response.choices and len(response.choices) > 0:
                 response_text = response.choices[0].message.content.strip(
                 ).upper()
+
+                # Audit: log the LLM validation response (redacted)
+                logger.info(f"LLM validation response: {self._redact(response_text)}")
 
                 if "UNSAFE" in response_text:
                     logger.warning(f"LLM validator marked input as unsafe")
