@@ -9,10 +9,12 @@ from app.auth.jwt import (
     fake_users_db, 
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from app.limits import limiter
 
 router = APIRouter()
 
 @router.post("/token", response_model=Token)
+@limiter.limit('10/minute')
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     user = authenticate_user(fake_users_db, form_data.username, form_data.password)
     if not user:

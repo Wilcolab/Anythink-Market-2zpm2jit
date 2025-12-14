@@ -7,6 +7,7 @@ from app.database.db_manager import (
     get_recent_transactions, get_all_recent_transactions
 )
 from app.models.llm_service import LLMService
+from app.limits import limiter
 from fastapi.security import OAuth2PasswordBearer
 
 router = APIRouter()
@@ -32,6 +33,7 @@ async def get_optional_user(authorization: Optional[str] = Header(None)):
     return None
 
 @router.post("/secure-query", response_model=QueryResponse)
+@limiter.limit('10/minute')
 async def secure_query(
     request: QueryRequest,
     current_user: Optional[User] = Depends(get_optional_user)
@@ -83,6 +85,7 @@ async def get_context_for_intent(intent_tag: str, username: str = None) -> str:
         return "\n\n".join([item['info'] for item in data_items]) if data_items else ""
 
 @router.get("/users/me")
+@limiter.limit('10/minute')
 async def get_current_user_info(current_user: Optional[User] = Depends(get_optional_user)):
     if not current_user:
         raise HTTPException(

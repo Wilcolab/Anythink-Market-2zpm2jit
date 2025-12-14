@@ -22,6 +22,8 @@ if not os.environ.get("ENGINE_WILCO_AI_URL"):
 
 from app.api.routes import router as api_router
 from app.auth.routes import router as auth_router
+from app.limits import limiter as app_limiter
+from slowapi import _rate_limit_exceeded_handler
 from app.database.db_manager import init_db, populate_sample_data
 
 # Global variable to track application readiness
@@ -37,6 +39,10 @@ async def setup_db():
     logger.info("Database setup complete!")
 
 app = FastAPI(title="SecureInfo Concierge", description="Financial assistant application with LLM integration")
+
+# Register rate limiter on the FastAPI app
+app.state.limiter = app_limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
 
 @app.on_event("startup")
 async def startup_event():
